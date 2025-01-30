@@ -1,0 +1,165 @@
+from transformers import pipeline
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
+import re
+import numpy as np
+from typing import Dict, List, Tuple
+
+class GiftRecommender:
+    def __init__(self):
+        # Initialize NER pipeline for entity extraction
+        self.ner = pipeline("ner", model="dbmdz/bert-large-cased-finetuned-conll03-english")
+        
+        # Initialize sentiment analysis pipeline
+        self.sentiment = pipeline("sentiment-analysis")
+        
+        # Initialize zero-shot classification for interest categorization
+        self.zero_shot = pipeline("zero-shot-classification")
+        
+        # Define interest categories
+        self.interest_categories = [
+            "art", "music", "sports", "technology", "reading",
+            "travel", "cooking", "gaming", "fashion", "outdoor activities"
+        ]
+        
+        # Initialize gift rules database
+        self.gift_rules = {
+            "art": ["art supplies set", "digital drawing tablet", "museum membership", "art classes"],
+            "music": ["wireless headphones", "concert tickets", "vinyl records", "music streaming subscription"],
+            "sports": ["fitness tracker", "sports equipment", "team merchandise", "gym membership"],
+            "technology": ["smart gadgets", "latest electronics", "tech accessories", "coding courses"],
+            "reading": ["e-reader", "book subscription", "rare book editions", "bookstore gift card"],
+            "travel": ["travel accessories", "language learning subscription", "travel guides", "luggage"],
+            "cooking": ["cooking classes", "premium ingredients set", "kitchen gadgets", "cookbook collection"],
+            "gaming": ["gaming console", "gaming accessories", "game subscription", "collectible items"],
+            "fashion": ["designer accessories", "fashion subscription box", "custom jewelry", "premium clothing"],
+            "outdoor": ["camping gear", "hiking equipment", "outdoor experiences", "adventure gear"]
+        }
+
+    def extract_age(self, text: str) -> int:
+        """Extract age from text using regex."""
+        age_pattern = r'\b(\d{1,2})\s*-?\s*years?\s*-?\s*old\b|\b(\d{1,2})\b'
+        matches = re.findall(age_pattern, text)
+        if matches:
+            # Return the first number found
+            age = next(int(num) for nums in matches for num in nums if num)
+            return age if 0 < age < 120 else None
+        return None
+
+    def extract_gender(self, text: str) -> str:
+        """Extract gender from text using keywords."""
+        text = text.lower()
+        gender_indicators = {
+            'female': ['she', 'her', 'sister', 'girlfriend', 'wife', 'daughter', 'mom', 'mother'],
+            'male': ['he', 'him', 'brother', 'boyfriend', 'husband', 'son', 'dad', 'father']
+        }
+        
+        for gender, indicators in gender_indicators.items():
+            if any(indicator in text for indicator in indicators):
+                return gender
+        return "unknown"
+
+    def extract_interests(self, text: str) -> List[Dict]:
+        """Extract and categorize interests using zero-shot classification."""
+        # First, extract potential interest phrases
+        interest_pattern = r'loves?\s+([^,.]+)|\blikes?\s+([^,.]+)'
+        matches = re.findall(interest_pattern, text.lower())
+        
+        interests = []
+        for match in matches:
+            phrase = next(m for m in match if m)
+            # Classify the interest into predefined categories
+            result = self.zero_shot(
+                phrase,
+                candidate_labels=self.interest_categories,
+                multi_label=False
+            )
+            
+            # Get sentiment score for the interest
+            sentiment_score = self.sentiment(phrase)[0]
+            
+            interests.append({
+                'phrase': phrase,
+                'category': result['labels'][0],
+                'confidence': result['scores'][0],
+                'sentiment': sentiment_score['label'],
+                'sentiment_score': sentiment_score['score']
+            })
+        
+        return interests
+
+    def extract_dislikes(self, text: str) -> List[str]:
+        """Extract dislikes from text."""
+        dislike_pattern = r'hates?\s+([^,.]+)|dislikes?\s+([^,.]+)'
+        matches = re.findall(dislike_pattern, text.lower())
+        return [next(m for m in match if m) for match in matches]
+
+    def get_gift_recommendations(self, text: str) -> Dict:
+        """Process text and return gift recommendations."""
+        # Extract basic information
+        age = self.extract_age(text)
+        gender = self.extract_gender(text)
+        interests = self.extract_interests(text)
+        dislikes = self.extract_dislikes(text)
+        
+        # Generate recommendations based on interests
+        recommendations = []
+        for interest in interests:
+            category = interest['category']
+            if category in self.gift_rules:
+                # Weight recommendations by sentiment and confidence
+                weight = interest['confidence'] * (2 if interest['sentiment'] == 'POSITIVE' else 1)
+                recommendations.extend([
+                    {
+                        'gift': gift,
+                        'category': category,
+                        'weight': weight,
+                        'reason': f"Based on their interest in {interest['phrase']}"
+                    }
+                    for gift in self.gift_rules[category]
+                ])
+        
+        # Sort recommendations by weight
+        recommendations.sort(key=lambda x: x['weight'], reverse=True)
+        
+        return {
+            'profile': {
+                'age': age,
+                'gender': gender,
+                'interests': interests,
+                'dislikes': dislikes
+            },
+            'recommendations': recommendations[:5]  # Return top 5 recommendations
+        }
+
+    def format_recommendations(self, results: Dict) -> str:
+        """Format the recommendations into a readable string."""
+        output = []
+        output.append("🎁 Gift Recommendations\n")
+        
+        profile = results['profile']
+        output.append(f"Profile Summary:")
+        output.append(f"- Age: {profile['age'] or 'Unknown'}")
+        output.append(f"- Gender: {profile['gender'].title()}")
+        output.append("- Interests: " + ", ".join(i['phrase'] for i in profile['interests']))
+        if profile['dislikes']:
+            output.append("- Dislikes: " + ", ".join(profile['dislikes']))
+        
+        output.append("\nTop Recommendations:")
+        for i, rec in enumerate(results['recommendations'], 1):
+            output.append(f"{i}. {rec['gift']}")
+            output.append(f"   • {rec['reason']}")
+        
+        return "\n".join(output)
+
+# Example usage
+if __name__ == "__main__":
+    recommender = GiftRecommender()
+    
+    # Example input
+    text = """I'm looking for a gift for my 25-year-old sister. 
+              She loves painting and traveling, especially in Japan. 
+              She hates loud noises and doesn't like spicy food."""
+    
+    results = recommender.get_gift_recommendations(text)
+    formatted_output = recommender.format_recommendations(results)
+    print(formatted_output)
