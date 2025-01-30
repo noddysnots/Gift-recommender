@@ -1,136 +1,79 @@
-import pytest
-from src.recommender import GiftRecommender
-from src.utils.text_processors import (
+# recommender.py
+
+from transformers import pipeline
+from .utils.text_processors import (
     extract_age,
     extract_gender,
     extract_interests,
     extract_dislikes
 )
 
-@pytest.fixture
-def recommender():
-    """Create a recommender instance for testing."""
-    return GiftRecommender()
-
-@pytest.fixture
-def sample_text():
-    """Provide sample text for testing."""
-    return """I'm looking for a gift for my 25-year-old sister. 
-              She loves painting and traveling, especially in Japan. 
-              She hates loud noises and doesn't like spicy food."""
-
-class TestTextProcessors:
-    """Tests for text processing utility functions."""
-
-    def test_extract_age(self):
-        """Test age extraction from text."""
-        test_cases = [
-            ("25-year-old sister", 25),
-            ("my sister is 30", 30),
-            ("she is 25 years old", 25),
-            ("no age here", None),
-            ("age is 150 years", None),  # Invalid age
+class GiftRecommender:
+    
+    def __init__(self):
+        self.zero_shot = pipeline("zero-shot-classification")
+        self.sentiment = pipeline("sentiment-analysis")
+        
+        # List of possible interest categories
+        self.interest_categories = [
+            "art", "music", "sports", "technology", "reading",
+            "travel", "cooking", "gaming", "fashion", "outdoor activities"
         ]
         
-        for text, expected in test_cases:
-            assert extract_age(text) == expected
+        # Pre-defined gift suggestions for each category
+        self.gift_rules = {
+            "art": ["art supplies set", "digital drawing tablet", "museum membership"],
+            "music": ["wireless headphones", "concert tickets", "vinyl records"],
+            "sports": ["fitness tracker", "sports equipment", "team merchandise"],
+            "technology": ["smart devices", "electronics", "tech gadgets"],
+            "gaming": ["gaming console", "gaming accessories", "game subscription"],
+            "travel": ["travel gear", "language courses", "travel guides"],
+            "reading": ["e-reader", "book subscription", "rare books"],
+            "cooking": ["cooking classes", "kitchen gadgets", "recipe books"]
+        }
 
-    def test_extract_gender(self):
-        """Test gender extraction from text."""
-        test_cases = [
-            ("my sister likes", "female"),
-            ("his brother wants", "male"),
-            ("they like", "unknown"),
-            ("my mother enjoys", "female"),
-            ("dad loves", "male"),
-        ]
+    def get_gift_recommendations(self, text: str):
+        # Build the user's profile from the text
+        profile = {
+            'age': extract_age(text),
+            'gender': extract_gender(text),
+            'interests': extract_interests(text, self.interest_categories),
+            'dislikes': extract_dislikes(text)
+        }
         
-        for text, expected in test_cases:
-            assert extract_gender(text) == expected
+        # Match each extracted interest to possible gift ideas
+        recommendations = []
+        for interest in profile['interests']:
+            cat = interest['category']
+            if cat in self.gift_rules:
+                for gift in self.gift_rules[cat]:
+                    recommendations.append({
+                        'gift': gift,
+                        'category': cat,
+                        'reason': f"Based on interest in {interest['phrase']}"
+                    })
+        
+        # Limit to top 5 for demonstration
+        return {'profile': profile, 'recommendations': recommendations[:5]}
 
-    def test_extract_interests(self):
-        """Test interest extraction and categorization."""
-        text = "She loves painting and enjoys traveling"
-        categories = ["art", "travel", "music"]
+    def format_recommendations(self, results: dict) -> str:
+        output = []
+        output.append("🎁 Gift Recommendations\n")
         
-        interests = extract_interests(text, categories)
-        
-        assert len(interests) == 2
-        assert any(i['phrase'] == 'painting' for i in interests)
-        assert any(i['phrase'] == 'traveling' for i in interests)
-        assert all('confidence' in i for i in interests)
-        assert all('sentiment' in i for i in interests)
-
-    def test_extract_dislikes(self):
-        """Test dislike extraction from text."""
-        text = "She hates loud noises and doesn't like spicy food"
-        dislikes = extract_dislikes(text)
-        
-        assert len(dislikes) == 2
-        assert "loud noises" in dislikes
-        assert "spicy food" in dislikes
-
-class TestGiftRecommender:
-    """Tests for main GiftRecommender class."""
-
-    def test_get_recommendations(self, recommender, sample_text):
-        """Test the complete recommendation process."""
-        results = recommender.get_gift_recommendations(sample_text)
-        
-        # Check if results contain all required fields
-        assert 'profile' in results
-        assert 'recommendations' in results
-        
-        # Check profile data
         profile = results['profile']
-        assert profile['age'] == 25
-        assert profile['gender'] == 'female'
-        assert len(profile['interests']) > 0
-        assert len(profile['dislikes']) > 0
+        output.append("Profile Summary:")
+        output.append(f"Age: {profile['age'] or 'Unknown'}")
+        output.append(f"Gender: {profile['gender'].title()}")
         
-        # Check recommendations
-        recommendations = results['recommendations']
-        assert len(recommendations) > 0
-        assert all('gift' in r for r in recommendations)
-        assert all('reason' in r for r in recommendations)
-
-    def test_recommendation_relevance(self, recommender):
-        """Test if recommendations are relevant to interests."""
-        text = "My brother loves gaming and technology"
-        results = recommender.get_gift_recommendations(text)
+        if profile['interests']:
+            output.append("Interests: " + ", ".join(i['phrase'] for i in profile['interests']))
+        if profile['dislikes']:
+            output.append("Dislikes: " + ", ".join(profile['dislikes']))
         
-        recommendations = results['recommendations']
-        assert any('gaming' in r['category'].lower() for r in recommendations)
-        assert any('technology' in r['category'].lower() for r in recommendations)
-
-    def test_format_recommendations(self, recommender, sample_text):
-        """Test recommendation formatting."""
-        results = recommender.get_gift_recommendations(sample_text)
-        formatted = recommender.format_recommendations(results)
+        if results['recommendations']:
+            output.append("\nTop Recommendations:")
+            for i, rec in enumerate(results['recommendations'], 1):
+                output.append(f"{i}. {rec['gift']}")
+                output.append(f"   • {rec['reason']}")
         
-        assert isinstance(formatted, str)
-        assert "Profile Summary" in formatted
-        assert "Top Recommendations" in formatted
-        assert "Age: 25" in formatted
-        assert "Gender: Female" in formatted
-
-    def test_empty_input(self, recommender):
-        """Test handling of empty input."""
-        results = recommender.get_gift_recommendations("")
-        
-        assert results['profile']['age'] is None
-        assert results['profile']['gender'] == 'unknown'
-        assert len(results['recommendations']) == 0
-
-    @pytest.mark.parametrize("text,expected_count", [
-        ("She loves art and music", 2),
-        ("He likes gaming", 1),
-        ("They enjoy reading, cooking, and traveling", 3),
-    ])
-    def test_interest_count(self, recommender, text, expected_count):
-        """Test counting of extracted interests."""
-        results = recommender.get_gift_recommendations(text)
-        assert len(results['profile']['interests']) == expected_count
-
-if __name__ == '__main__':
-    pytest.main([__file__]) 
+        return "\n".join(output)
