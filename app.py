@@ -1,29 +1,47 @@
-import os
-from flask import Flask, request, jsonify
+import gradio as gr
+import requests
+from transformers import pipeline
 
-from src.recommender import GiftRecommender
+# Load NLP model
+zero_shot = pipeline("zero-shot-classification", model="facebook/bart-large-mnli")
 
-app = Flask(__name__)
-recommender = GiftRecommender()
+# 🎁 Web search for gift suggestions
+def search_gifts(query):
+    amazon_url = f"https://www.amazon.in/s?k={query.replace(' ', '+')}"
+    igp_url = f"https://www.igp.com/search?q={query.replace(' ', '+')}"
+    indiamart_url = f"https://dir.indiamart.com/search.mp?ss={query.replace(' ', '+')}"
 
-# 🏠 Homepage Route (Fixes 404)
-@app.route("/")
-def home():
-    return "<h2>Welcome to the NLP Gift Recommender API!</h2><p>Use the /recommend endpoint to get recommendations.</p>"
+    return {"Amazon": amazon_url, "IGP": igp_url, "IndiaMart": indiamart_url}
 
-# 🎁 Gift Recommendation API
-@app.route("/recommend", methods=["POST"])
-def recommend():
-    data = request.json
-    text = data.get("text", "")
-    
+# 🎯 Main function for gift recommendation
+def recommend_gifts(text):
     if not text:
-        return jsonify({"error": "No input provided"}), 400
+        return "Please enter a description."
 
-    results = recommender.get_gift_recommendations(text)
-    return jsonify(results)
+    # NLP Processing
+    categories = ["art", "music", "tech", "travel", "books", "fashion", "fitness", "gaming"]
+    results = zero_shot(text, categories)
 
-# ✅ Ensure Correct Port Binding for Render
+    # Get top interest
+    top_interest = results["labels"][0]
+
+    # Search for gifts based on interest
+    links = search_gifts(top_interest)
+
+    return {
+        "Predicted Interest": top_interest,
+        "Gift Suggestions": links
+    }
+
+# 🎨 Gradio UI for easy interaction
+demo = gr.Interface(
+    fn=recommend_gifts, 
+    inputs="text", 
+    outputs="json",
+    title="🎁 AI Gift Recommender",
+    description="Enter details about the person you are buying a gift for, and get personalized suggestions with shopping links!",
+)
+
+# 🚀 Launch Gradio App
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))  # Default to port 5000
-    app.run(host="0.0.0.0", port=port)  # Binds to all network interfaces
+    demo.launch()
