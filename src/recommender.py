@@ -4,9 +4,18 @@ from transformers import pipeline
 
 zero_shot = pipeline(
     "zero-shot-classification", 
-    model="typeform/distilbert-base-uncased-mnli",  # Smaller model
-    device=-1  # Ensures CPU usage without unnecessary overhead
+    model="typeform/distilbert-base-uncased-mnli",
+    device=-1
 )
+
+def classify(text, labels):
+    """Perform zero-shot classification with proper label mapping."""
+    result = zero_shot(text, labels, multi_label=True)
+    return [
+        {"label": res, "score": score} 
+        for res, score in zip(result["labels"], result["scores"])
+    ]
+
 
 from .utils.text_processors import (
     extract_age,
