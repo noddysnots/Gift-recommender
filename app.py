@@ -1,4 +1,6 @@
-from flask import Flask, request, jsonify, render_template
+import os
+from flask import Flask, request, jsonify
+
 from src.recommender import GiftRecommender
 
 app = Flask(__name__)
@@ -21,5 +23,7 @@ def recommend():
     results = recommender.get_gift_recommendations(text)
     return jsonify(results)
 
+# ✅ Ensure Correct Port Binding for Render
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    port = int(os.environ.get("PORT", 5000))  # Default to port 5000
+    app.run(host="0.0.0.0", port=port)  # Binds to all network interfaces
