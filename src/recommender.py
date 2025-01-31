@@ -1,7 +1,7 @@
 # recommender.py
 
 from transformers import pipeline
-zero_shot = pipeline("zero-shot-classification", model="facebook/bart-base")  # Less RAM needed
+zero_shot = pipeline("zero-shot-classification", model="distilbert-base-uncased")
 from .utils.text_processors import (
     extract_age,
     extract_gender,
