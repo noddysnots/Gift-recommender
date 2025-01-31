@@ -1,7 +1,13 @@
 # recommender.py
 
 from transformers import pipeline
-zero_shot = pipeline("zero-shot-classification", model="distilbert-base-uncased")
+
+zero_shot = pipeline(
+    "zero-shot-classification", 
+    model="typeform/distilbert-base-uncased-mnli",  # Smaller model
+    device=-1  # Ensures CPU usage without unnecessary overhead
+)
+
 from .utils.text_processors import (
     extract_age,
     extract_gender,
